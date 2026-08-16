@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+.gitignore
+*.log
+docs
+prompts
+prompt-generator
+scripts
+deploy
