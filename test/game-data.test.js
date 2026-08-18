@@ -1,40 +1,45 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { isValidLinkLabel, linkSlots, missions } from '../src/game-data.js'
+import { calculateAccuracy, challenges, countComponents, getPerformance } from '../src/game-data.js'
 
-test('writing mission has a complete ten-sentence loop', () => {
-  assert.equal(missions.length, 10)
-  assert.ok(missions.every((mission) => mission.idea.length === 2))
-  assert.ok(missions.every((mission) => mission.pattern && mission.sample.endsWith('.')))
+test('game contains ten fixed B1 sentence challenges', () => {
+  assert.equal(challenges.length, 10)
+  assert.equal(new Set(challenges.map(({ id }) => id)).size, 10)
+  assert.ok(challenges.every(({ segments, steps }) => segments.length > steps.length))
 })
 
-test('linking round covers five transitions with the requested words', () => {
-  assert.deepEqual(linkSlots.map((slot) => slot.answer), ['First,', 'Second,', 'However,', 'First,', 'Besides,'])
-  assert.equal(new Set(linkSlots.map((slot) => slot.before)).size, linkSlots.length)
+test('every step points to one unique clickable section in its sentence', () => {
+  challenges.forEach(({ id, segments, steps }) => {
+    const selectable = segments.filter(({ context }) => !context)
+    const selectableIds = new Set(selectable.map(({ id }) => id))
+    assert.equal(selectableIds.size, selectable.length, `${id} has duplicate sections`)
+    steps.forEach(({ answer }) => assert.ok(selectableIds.has(answer), `${id} is missing ${answer}`))
+    assert.equal(new Set(steps.map(({ answer }) => answer)).size, steps.length, `${id} reuses an answer`)
+  })
 })
 
-test('mission narration and reference answers match slides 32–41 and 45–46', () => {
-  assert.deepEqual(missions.map((mission) => mission.prompt), [
-    'Let’s begin!',
-    'Great job! Here’s another one.',
-    'Very well done! Here’s something a bit harder!',
-    'You aced it! How about this one?',
-    'Another idea for you!',
-    'This one’s easy. See if you can do it in 1 minute!',
-    'This one’s hard! Challenge your best friend! Who can do it faster?',
-    'You’re really good! Try this!',
-    'Finally! We’re nearly done. Only one more!',
-    'I lied! But really, here’s the last one!',
-  ])
-  assert.equal(missions[4].sample, 'This helps them to become open-minded.')
-  assert.equal(missions[6].sample, 'Having bad English prevents students from communicating well.')
+test('verb patterns are progressively revealed and later questions stay simple', () => {
+  assert.ok(challenges.every(({ instruction }) => !instruction.includes('+ somebody')))
+  assert.ok(challenges.some(({ steps }) => steps.some(({ pattern }) => pattern === 'encourage + somebody + to V')))
+  assert.deepEqual(challenges[0].steps.slice(2).map(({ label }) => label), ['V', 'Noun', 'Adj'])
+  assert.deepEqual(challenges[0].steps.slice(3).map(({ revealAt }) => revealAt), [3, 3])
+  assert.ok(challenges.slice(2).every(({ structure }) => !/Although|If|Because/.test(structure)))
+  assert.ok(challenges.every(({ steps }) => steps.every(({ label }) => !/Object|Base verb/i.test(label))))
 })
 
-test('Second and Besides are interchangeable in the two addition slots', () => {
-  assert.equal(isValidLinkLabel(3, 'Second,'), true)
-  assert.equal(isValidLinkLabel(3, 'Besides,'), true)
-  assert.equal(isValidLinkLabel(8, 'Second,'), true)
-  assert.equal(isValidLinkLabel(8, 'Besides,'), true)
-  assert.equal(isValidLinkLabel(5, 'However,'), true)
-  assert.equal(isValidLinkLabel(5, 'Second,'), false)
+test('questions two and three use the requested sections', () => {
+  assert.equal(challenges[1].steps[0].answer, 'reduce-stress')
+  assert.equal(challenges[1].steps.at(-1).answer, 'study-plan')
+  assert.deepEqual(challenges[2].steps.map(({ answer }) => answer), ['students', 'participate', 'interesting-activities'])
+  assert.ok(challenges[2].segments.some(({ context, text }) => context && text === 'in'))
+})
+
+test('performance bands and accuracy follow incorrect-check scoring', () => {
+  assert.equal(getPerformance(0).title, 'Exceptional job!')
+  assert.equal(getPerformance(3).title, 'Well done!')
+  assert.equal(getPerformance(4).title, 'Good effort!')
+  assert.equal(getPerformance(8).title, 'Keep practising!')
+  assert.equal(calculateAccuracy(50, 0), 100)
+  assert.equal(calculateAccuracy(50, 10), 83)
+  assert.equal(countComponents(), 41)
 })

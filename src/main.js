@@ -3,65 +3,41 @@ import logoUrl from '../assets/brand/dol-logo.png'
 import correctUrl from '../assets/audio/sfx/correct-chime.mp3'
 import wrongUrl from '../assets/audio/sfx/wrong-soft.mp3'
 import victoryUrl from '../assets/audio/sfx/victory-fanfare.mp3'
-import clippyUrl from './assets/clippy.png'
-import { isValidLinkLabel, linkSlots, missions } from './game-data.js'
+import astronautUrl from './assets/astronaut-guide.png'
+import { calculateAccuracy, challenges, countComponents, getPerformance } from './game-data.js'
 
+const app = document.querySelector('#app')
 const sounds = {
   correct: new Audio(correctUrl),
   wrong: new Audio(wrongUrl),
   victory: new Audio(victoryUrl),
 }
-
-Object.values(sounds).forEach((sound) => { sound.volume = 0.42 })
-
-const linkingTokens = [
-  { id: 'first-a', label: 'First,' },
-  { id: 'second', label: 'Second,' },
-  { id: 'however', label: 'However,' },
-  { id: 'first-b', label: 'First,' },
-  { id: 'besides', label: 'Besides,' },
-]
-
-function shuffledTokens() {
-  const tokens = [...linkingTokens]
-  do {
-    for (let index = tokens.length - 1; index > 0; index -= 1) {
-      const swapIndex = Math.floor(Math.random() * (index + 1))
-      ;[tokens[index], tokens[swapIndex]] = [tokens[swapIndex], tokens[index]]
-    }
-  } while (tokens.map((token) => token.label).join('|') === linkSlots.map((slot) => slot.answer).join('|'))
-  return tokens
-}
-
-const state = {
-  phase: 'welcome',
-  completed: [],
-  hintVisible: false,
-  muted: false,
-  timer: 60,
-  timerRunning: false,
-  timerId: null,
-  selectedToken: null,
-  placements: {},
-  feedback: '',
-  feedbackKind: '',
-  locking: false,
-  tokenOrder: shuffledTokens(),
-  linksChecked: false,
-  invalidSlots: [],
-}
-
-const app = document.querySelector('#app')
+Object.values(sounds).forEach((sound) => { sound.volume = 0.4 })
 
 const icons = {
   sound: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4 4 0 0 0-2-3.46v6.92A4 4 0 0 0 16.5 12Z"/></svg>',
   mute: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Zm11.5 1 2 2-2 2 1.5 1.5 2-2 2 2 1.5-1.5-2-2 2-2L21 8.5l-2 2-2-2L15.5 10Z"/></svg>',
-  reset: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5a7 7 0 1 1-6.65 9.2l2.08-.68A4.8 4.8 0 1 0 8.2 8.1L11 11H3V3l2.62 2.62A6.97 6.97 0 0 1 12 5Z"/></svg>',
-  bulb: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21h6v-2H9v2Zm3-19a7 7 0 0 0-4 12.74V17h8v-2.26A7 7 0 0 0 12 2Zm2.1 11.68-.9.52V15h-2.4v-.8l-.9-.52a4.8 4.8 0 1 1 4.2 0Z"/></svg>',
-  lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 8h-1V6a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v10h14V10a2 2 0 0 0-2-2Zm-7-2a2 2 0 0 1 4 0v2h-4V6Zm3 9.73V18h-2v-2.27a2 2 0 1 1 2 0Z"/></svg>',
-  play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7V5Z"/></svg>',
-  clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 11h-5v-2h3V6h2v7Z"/></svg>',
+  reset: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5a7 7 0 1 1-6.35 9.95l2.05-.76A4.8 4.8 0 1 0 8.2 8.1L11 11H3V3l2.63 2.63A6.96 6.96 0 0 1 12 5Z"/></svg>',
+  check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.2 16.2-4.4-4.4-1.6 1.6 6 6L21 7.6 19.4 6Z"/></svg>',
+  arrow: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13.2 5.3-1.4 1.4 4.3 4.3H4v2h12.1l-4.3 4.3 1.4 1.4 6.7-6.7Z"/></svg>',
 }
+
+function initialState() {
+  return {
+    phase: 'welcome',
+    questionIndex: 0,
+    stepIndex: 0,
+    selected: null,
+    mistakes: challenges.map(() => 0),
+    answers: challenges.map(() => []),
+    feedback: '',
+    feedbackKind: '',
+    muted: false,
+    completionEmitted: false,
+  }
+}
+
+let state = initialState()
 
 function playSound(name) {
   if (state.muted) return
@@ -70,464 +46,265 @@ function playSound(name) {
   sound.play().catch(() => {})
 }
 
-function tokenById(id) {
-  return linkingTokens.find((token) => token.id === id)
+function segmentText(challenge, id) {
+  return challenge.segments.find((segment) => segment.id === id)?.text || ''
 }
 
-function clippy(mood = 'thinking') {
-  return `<div class="clippy clippy--${mood}" aria-hidden="true">
-    <img src="${clippyUrl}" alt="" />
-    <span class="clippy__talk-line clippy__talk-line--one"></span>
-    <span class="clippy__talk-line clippy__talk-line--two"></span>
-  </div>`
+function totalMistakes() {
+  return state.mistakes.reduce((sum, value) => sum + value, 0)
+}
+
+function completedComponents() {
+  const before = challenges.slice(0, state.questionIndex).reduce((sum, challenge) => sum + challenge.steps.length, 0)
+  return before + (state.phase === 'play' ? state.stepIndex : state.phase === 'results' ? challenges[state.questionIndex]?.steps.length || 0 : 0)
 }
 
 function topbar() {
-  const count = state.completed.length
+  const done = state.phase === 'results' ? countComponents() : completedComponents()
+  const percent = Math.round((done / countComponents()) * 100)
   return `<header class="topbar">
     <div class="brand">
       <img src="${logoUrl}" alt="DOL English" />
-      <span class="brand__divider"></span>
-      <div><strong>Clippy's Writing Mission</strong><small>Build it. Link it. Read it.</small></div>
+      <span class="brand__line"></span>
+      <div><strong>Sentence Detective</strong><small>Giải mã cấu trúc câu</small></div>
     </div>
-    <div class="teacher-tools">
-      <div class="progress-summary" aria-label="${count} of 10 sentences complete">
-        <span>Paragraph power</span>
-        <div class="power-dots">${missions.map((_, index) => `<i class="${index < count ? 'is-filled' : ''}"></i>`).join('')}</div>
-        <b>${count}/10</b>
-      </div>
-      <button class="icon-button" data-action="mute" aria-label="${state.muted ? 'Unmute sound' : 'Mute sound'}" title="${state.muted ? 'Unmute' : 'Mute'}">${state.muted ? icons.mute : icons.sound}</button>
-      <button class="icon-button" data-action="reset" aria-label="Reset game" title="Reset game">${icons.reset}</button>
+    ${state.phase !== 'welcome' ? `<div class="topbar__progress" aria-label="Tiến độ ${percent}%"><span><i style="width:${percent}%"></i></span><b>${percent}%</b></div>` : ''}
+    <div class="topbar__tools">
+      <button class="icon-button" data-action="mute" aria-label="${state.muted ? 'Bật âm thanh' : 'Tắt âm thanh'}" title="${state.muted ? 'Bật âm thanh' : 'Tắt âm thanh'}">${state.muted ? icons.mute : icons.sound}</button>
+      ${state.phase !== 'welcome' ? `<button class="icon-button" data-action="reset" aria-label="Chơi lại từ đầu" title="Chơi lại từ đầu">${icons.reset}</button>` : ''}
     </div>
   </header>`
 }
 
-function paragraphPanel({ compact = false, connect = false } = {}) {
-  const sentences = missions.map((mission, index) => state.completed[index] || mission.sample)
-  return `<section class="paragraph-panel ${compact ? 'paragraph-panel--compact' : ''}" aria-label="Our paragraph">
-    <div class="paragraph-heading">
-      <div><span class="eyebrow">Our paragraph</span><strong>${connect ? 'Connect the ideas' : `${state.completed.length} sentence${state.completed.length === 1 ? '' : 's'} locked in`}</strong></div>
-      <span class="page-tab">DRAFT 01</span>
-    </div>
-    <ol class="paragraph-lines">
-      ${sentences.map((sentence, index) => {
-        const slot = connect ? linkSlots.find((item) => item.before === index) : null
-        const placedId = slot ? state.placements[index] : ''
-        const placedToken = placedId ? tokenById(placedId) : null
-        const placed = placedToken?.label || ''
-        const isInvalid = state.invalidSlots.includes(index)
-        const showLine = connect || index < state.completed.length
-        const isNext = index === state.completed.length && !connect
-        const isHidden = !connect && index > state.completed.length
-        const isLatest = !connect && index === state.completed.length - 1
-        return `<li class="${showLine ? 'is-complete' : ''} ${isNext ? 'is-next' : ''} ${isHidden ? 'is-hidden' : ''} ${isLatest ? 'is-latest' : ''}">
-          <span class="line-number">${String(index + 1).padStart(2, '0')}</span>
-          <div class="sentence-line">
-            ${slot ? `<button class="link-slot ${placed ? 'is-filled' : ''} ${isInvalid ? 'is-incorrect' : ''}" data-slot="${index}" ${placedId ? `data-placed-token="${placedId}" draggable="true"` : ''} aria-label="Linking word before sentence ${index + 1}">${placed || 'linking word'}</button>` : ''}
-            <span>${showLine ? sentence : 'Your next sentence will land here...'}</span>
-          </div>
-          ${showLine && !connect ? '<span class="lock-mark">LOCKED</span>' : ''}
-        </li>`
-      }).join('')}
-    </ol>
-  </section>`
-}
-
-function missionView() {
-  const index = state.completed.length
-  const mission = missions[index]
-  if (!mission) return boxView()
-  const timerClass = state.timer <= 10 ? 'is-low' : ''
-
-  return `<main class="mission-layout">
-    <aside class="guide-panel">
-      <div class="guide-name"><span class="status-dot"></span> CLIPPY ONLINE</div>
-      ${clippy(mission.timed ? 'challenge' : 'thinking')}
-      <div class="speech-bubble">
-        <span class="speech-kicker">MISSION ${String(index + 1).padStart(2, '0')}</span>
-        <p>${mission.prompt}</p>
-      </div>
-      <p class="guide-tip">Say ideas aloud. The teacher types the class answer.</p>
-    </aside>
-
-    <section class="workbench">
-      <div class="mission-meta">
-        <span class="mission-count">Sentence ${index + 1} <i>/ 10</i></span>
-        <span class="category-tag category-tag--${mission.category.toLowerCase()}">${mission.category}</span>
-      </div>
-      <div class="idea-note">
-        <span class="pin"></span>
-        <span class="eyebrow">Your idea</span>
-        <div class="idea-flow"><strong>${mission.idea[0]}</strong><span class="idea-arrow">${mission.direction === 'backward' ? '←' : '→'}</span><strong>${mission.idea[1]}</strong></div>
-      </div>
-
-      <div class="factory-section">
-        <div class="section-title"><span>Sentence factory</span><small>Choose the right Word pattern</small></div>
-        <div class="word-cards word-cards--patterns">
-          <span class="factory-pattern">Cause–Effect</span>
-          <span class="factory-pattern">Advantages–Disadvantages</span>
-        </div>
-      </div>
-
-      ${mission.timed ? `<div class="timer-strip ${timerClass}">
-        <span>${icons.clock}</span><strong id="timer-value">${state.timer}</strong><small>seconds</small>
-        <button class="mini-button" data-action="timer">${state.timerRunning ? 'Pause' : state.timer < 60 ? 'Resume' : 'Start challenge'}</button>
-      </div>` : ''}
-
-      <div class="answer-section">
-        <label for="sentence-input"><span>Teacher types the class's answer</span><small>One complete sentence</small></label>
-        <textarea id="sentence-input" rows="2" placeholder="Start typing here..." maxlength="220"></textarea>
-        <div class="answer-actions">
-          <div class="hint-wrap">
-            <button class="hint-button" data-action="hint">${icons.bulb} ${state.hintVisible ? 'Hide pattern' : 'Reveal a pattern'}</button>
-            ${state.hintVisible ? `<span class="pattern-chip"><i>Useful pattern</i>${mission.pattern}</span>` : ''}
-          </div>
-          <button class="sample-button" data-action="sample">Use sample answer</button>
-          <button class="lock-button" data-action="lock" ${state.locking ? 'disabled' : ''}>${icons.lock} ${state.locking ? 'LOCKING...' : 'LOCK IT IN'}</button>
-        </div>
-        <p id="input-feedback" class="input-feedback" role="status"></p>
-      </div>
-    </section>
-    ${paragraphPanel({ compact: true })}
-  </main>`
-}
-
 function welcomeView() {
-  return `<main class="welcome-screen">
-    <div class="welcome-copy">
-      <span class="mission-label">DOL CLASS MISSION · WRITING</span>
-      <h1>One idea.<br><em>One strong sentence.</em></h1>
-      <p>Each time, you will see an idea. Use the right Word patterns to write a full sentence from that idea. Got it?</p>
-      <div class="welcome-actions">
-        <button class="start-button" data-action="start">LET'S BUILD ${icons.play}</button>
-        <span>10 sentences · 1 secret round</span>
+  return `<main class="welcome">
+    <section class="welcome__copy">
+      <span class="eyebrow">DOL GRAMMAR MISSION · B1</span>
+      <h1>Nhìn từng mảnh.<br><em>Hiểu cả câu.</em></h1>
+      <p>Chọn phần câu phù hợp với từng thành phần ngữ pháp. Câu càng dài, bạn càng cần quan sát thật kỹ!</p>
+      <div class="how-to">
+        <div><b>1</b><span><strong>Nhìn thành phần sáng xanh</strong><small>Đó là phần bạn cần tìm.</small></span></div>
+        <div><b>2</b><span><strong>Chọn một section rồi kiểm tra</strong><small>Nếu chưa đúng, hãy thử lại.</small></span></div>
       </div>
-    </div>
-    <div class="welcome-clippy">
-      <div class="hello-bubble">Hi! My name is Clippy!<br><strong>I’m here to help you write a paragraph!</strong></div>
-      ${clippy('hello')}
-      <div class="desk-shadow"></div>
-    </div>
-    <div class="mission-route" aria-label="Mission route">
-      <span class="is-current">01</span><i></i><span>05</span><i></i><span>10</span><i></i><span class="route-box">SECRET BOX</span>
-    </div>
-  </main>`
-}
-
-function boxView() {
-  return `<main class="box-stage">
-    <div class="box-copy">
-      <span class="eyebrow">Paragraph complete?</span>
-      <h1>Wait a second…</h1>
-      <p>Our sentences are ready. There is just one thing left before they become a complete paragraph.</p>
-      <div class="box-dialogue">Wait! I forgot one thing. Open this box.</div>
-    </div>
-    <div class="box-clippy">${clippy('surprised')}</div>
-    <button class="secret-box" data-action="open-box" aria-label="Open Clippy's secret box">
-      <span class="box-lid"><i></i></span>
-      <span class="box-base"><strong>CLIPPY'S</strong><small>SECRET WORD BOX</small></span>
-      <span class="click-label">CLICK TO OPEN</span>
-    </button>
-    <div class="box-preview">${paragraphPanel({ compact: true })}</div>
-  </main>`
-}
-
-function connectView() {
-  const placedIds = Object.values(state.placements)
-  const available = state.tokenOrder.filter((token) => !placedIds.includes(token.id))
-  const done = Object.keys(state.placements).length === linkSlots.length
-
-  return `<main class="connect-stage ${done ? 'is-done' : ''}">
-    <section class="connect-header">
-      <div>
-        <span class="eyebrow">Mini boss round</span>
-        <h1>Connect the paragraph</h1>
-        <p>Let’s use these words to connect your sentences and form a complete essay!</p>
-      </div>
-      <div class="connect-guide">${clippy(done ? 'happy' : 'thinking')}<p>${done ? 'Every idea clicks!' : 'Think: add, order, or contrast?'}</p></div>
+      <button class="primary-button" data-action="start">BẮT ĐẦU THỬ THÁCH ${icons.arrow}</button>
     </section>
-    <div class="connect-workspace">
-      ${paragraphPanel({ connect: true })}
-      <aside class="word-box">
-        <div class="word-box__top"><span>Clippy's word box</span><b>${available.length} left</b></div>
-        <div class="link-tokens" data-return-zone aria-label="Available linking words">
-          ${available.map((token) => `<button draggable="true" class="link-token ${state.selectedToken === token.id ? 'is-selected' : ''}" data-token="${token.id}" aria-pressed="${state.selectedToken === token.id}"><span class="grip">⠿</span>${token.label}</button>`).join('')}
-        </div>
-        <div class="connection-key">
-          <span><i class="key-dot key-dot--blue"></i>order benefits</span>
-          <span><i class="key-dot key-dot--red"></i>show contrast</span>
-          <span><i class="key-dot key-dot--amber"></i>order disadvantages</span>
-        </div>
-        <p class="connect-feedback ${state.feedbackKind}" role="status">${state.feedback || 'Arrange all five words freely, then check your paragraph.'}</p>
-        ${done && !state.linksChecked ? `<button class="check-links-button" data-action="check-links">CHECK CONNECTIONS</button>` : ''}
-        ${state.linksChecked ? `<button class="finish-button" data-action="finish">READ OUR PARAGRAPH ${icons.play}</button>` : ''}
-      </aside>
-    </div>
+    <aside class="welcome__guide">
+      <div class="guide-bubble"><span>Xin chào!</span><strong>Mình sẽ giúp bạn tìm manh mối trong từng câu.</strong></div>
+      <img src="${astronautUrl}" alt="Phi hành gia hướng dẫn DOL" />
+      <div class="guide-shadow"></div>
+    </aside>
   </main>`
 }
 
-function completeView() {
-  const linkedSentences = state.completed.map((sentence, index) => {
-    const linker = tokenById(state.placements[index])?.label
-    return `${linker ? `<strong>${linker}</strong> ` : ''}${sentence}`
-  }).join(' ')
-  return `<main class="final-stage">
-    <div class="final-rays"></div>
-    <section class="final-card">
-      <div class="final-clippy">${clippy('happy')}</div>
-      <span class="eyebrow">Mission accomplished</span>
-      <h1>That sounds like a paragraph.</h1>
-      <p class="final-paragraph">${linkedSentences}</p>
-      <div class="final-footer">
-        <div><span>10</span><small>sentences</small></div><i></i><div><span>5</span><small>connections</small></div>
-        <button class="start-button" data-action="reset-now">PLAY AGAIN ${icons.reset}</button>
+function resolvedStructureText(step, answer) {
+  const prefixes = [
+    ['For +', 'For '], ['To +', 'To '], ['Because of +', 'Because of '],
+    ['Although +', 'Although '], ['If +', 'If '], ['due to +', 'due to '],
+    ['because +', 'because '], ['by +', 'by '], ['in +', 'in '],
+    ['with +', 'with '], ['for +', 'for '],
+  ]
+  const match = prefixes.find(([label]) => step.label.startsWith(label))
+  return `${match?.[1] || ''}${answer}`
+}
+
+function structureFormula(challenge) {
+  const finished = state.stepIndex >= challenge.steps.length
+  const visibleSteps = challenge.steps
+    .map((step, index) => ({ step, index }))
+    .filter(({ step }) => finished || step.revealAt === undefined || state.stepIndex >= step.revealAt)
+
+  return `<div class="structure-formula" role="heading" aria-level="1" aria-label="Cấu trúc: ${challenge.structure}">
+    ${visibleSteps.map(({ step, index }, visibleIndex) => {
+      const done = index < state.stepIndex
+      const active = index === state.stepIndex
+      const revealed = step.revealAt !== undefined && state.stepIndex === step.revealAt
+      const answer = done ? segmentText(challenge, step.answer) : ''
+      const text = done ? resolvedStructureText(step, answer) : step.label
+      const join = visibleIndex === 0 ? '' : (step.joinBefore || '+')
+      return `${join ? `<span class="formula-join ${revealed ? 'is-revealed' : ''}">${join}</span>` : ''}<span class="formula-part ${done ? 'is-done' : ''} ${active ? 'is-active' : ''} ${revealed ? 'is-revealed' : ''}">${text}</span>`
+    }).join('')}
+  </div>`
+}
+
+function sentenceBoard(challenge) {
+  const locked = new Set(state.answers[state.questionIndex])
+  return `<div class="sentence-board" aria-label="Câu tiếng Anh cần phân tích">
+    ${challenge.segments.map((segment) => {
+      const suffix = segment.suffix || ''
+      if (segment.context) return `<span class="context-word">${segment.text}${suffix}</span>`
+      const isLocked = locked.has(segment.id)
+      const isSelected = state.selected === segment.id
+      return `<button class="sentence-piece ${isLocked ? 'is-locked' : ''} ${isSelected ? 'is-selected' : ''}" data-segment="${segment.id}" ${isLocked ? 'disabled' : ''} aria-pressed="${isSelected}">${segment.text}${suffix}</button>`
+    }).join(' ')}
+  </div>`
+}
+
+function playView() {
+  const challenge = challenges[state.questionIndex]
+  const finished = state.stepIndex >= challenge.steps.length
+  const currentStep = finished ? null : challenge.steps[state.stepIndex]
+  return `<main class="play-layout">
+    <section class="play-card">
+      <div class="question-head">
+        <span class="eyebrow">CÂU ${String(state.questionIndex + 1).padStart(2, '0')} / 10 · CẤU TRÚC TỔNG</span>
+        <span class="attempt-badge"><b>${state.mistakes[state.questionIndex]}</b> lần thử lại</span>
+        ${structureFormula(challenge)}
       </div>
+      <div class="task-prompt">
+        <p>${finished ? '<strong>Bạn đã giải mã cả câu!</strong> Các thành phần đúng đã được điền vào cấu trúc.' : `Chọn phần câu phù hợp với <strong>${currentStep.label}</strong>.`}</p>
+      </div>
+      ${sentenceBoard(challenge)}
+      <div class="feedback ${state.feedbackKind}" role="status" aria-live="polite">
+        <span class="feedback__icon">${state.feedbackKind === 'success' ? icons.check : state.feedbackKind === 'error' ? '!' : '?'}</span>
+        <p>${state.feedback || (finished ? 'Tuyệt lắm! Hãy chuyển sang câu tiếp theo.' : 'Nhấn vào một phần câu, sau đó chọn “Kiểm tra”.')}</p>
+      </div>
+      <div class="play-actions">
+        ${finished
+          ? `<button class="primary-button" data-action="next">${state.questionIndex === challenges.length - 1 ? 'XEM KẾT QUẢ' : 'CÂU TIẾP THEO'} ${icons.arrow}</button>`
+          : `<button class="check-button" data-action="check" ${state.selected ? '' : 'disabled'}>${icons.check} KIỂM TRA</button>`}
+      </div>
+    </section>
+    <aside class="mission-panel">
+      <span class="mission-panel__label">NHIỆM VỤ</span>
+      <div class="mission-panel__number">${String(state.questionIndex + 1).padStart(2, '0')}</div>
+      <p>Chọn đúng từng thành phần theo thứ tự từ trái sang phải.</p>
+      <div class="question-dots">${challenges.map((_, index) => `<i class="${index < state.questionIndex ? 'is-done' : ''} ${index === state.questionIndex ? 'is-current' : ''}"></i>`).join('')}</div>
+      <img src="${astronautUrl}" alt="" />
+    </aside>
+  </main>`
+}
+
+function buildResults() {
+  const total = totalMistakes()
+  const correct = countComponents()
+  return {
+    gameId: 'dol-sentence-detective-b1',
+    completedAt: new Date().toISOString(),
+    totalIncorrectChecks: total,
+    correctComponents: correct,
+    accuracy: calculateAccuracy(correct, total),
+    performance: getPerformance(total).title,
+    sentences: challenges.map((challenge, index) => ({
+      number: index + 1,
+      id: challenge.id,
+      structure: challenge.structure,
+      incorrectChecks: state.mistakes[index],
+      accuracy: calculateAccuracy(challenge.steps.length, state.mistakes[index]),
+    })),
+  }
+}
+
+function emitCompletion() {
+  if (state.completionEmitted) return
+  state.completionEmitted = true
+  const payload = buildResults()
+  window.dispatchEvent(new CustomEvent('dol-game-complete', { detail: payload }))
+  const targetOrigin = import.meta.env.VITE_LMS_ORIGIN
+  if (targetOrigin && window.parent !== window) {
+    window.parent.postMessage({ type: 'DOL_GAME_COMPLETE', payload }, targetOrigin)
+  }
+}
+
+function resultsView() {
+  const results = buildResults()
+  const performance = getPerformance(results.totalIncorrectChecks)
+  return `<main class="results">
+    <section class="result-hero result-hero--${performance.tone}">
+      <div class="result-rings"></div>
+      <span class="eyebrow">HOÀN THÀNH 10 / 10 CÂU</span>
+      <h1>${performance.title}</h1>
+      <p>${performance.message}</p>
+      <div class="result-stats">
+        <div><strong>${results.accuracy}%</strong><span>Độ chính xác</span></div>
+        <div><strong>${results.totalIncorrectChecks}</strong><span>Lần thử lại</span></div>
+        <div><strong>${results.correctComponents}</strong><span>Thành phần đúng</span></div>
+      </div>
+    </section>
+    <section class="result-detail">
+      <div class="result-detail__head"><div><span class="eyebrow">CHI TIẾT BÀI LÀM</span><h2>Kết quả từng câu</h2></div><span>Độ chính xác = lựa chọn đúng / tổng số lần kiểm tra</span></div>
+      <div class="result-table">
+        <div class="result-row result-row--head"><span>Câu</span><span>Cấu trúc</span><span>Thử lại</span><span>Chính xác</span></div>
+        ${results.sentences.map((item) => `<div class="result-row"><b>${String(item.number).padStart(2, '0')}</b><span>${item.structure}</span><span>${item.incorrectChecks}</span><strong>${item.accuracy}%</strong></div>`).join('')}
+      </div>
+      <div class="result-actions"><p>Kết quả đã sẵn sàng để LMS nhận khi được tích hợp.</p><button class="primary-button" data-action="restart">CHƠI LẠI ${icons.reset}</button></div>
     </section>
   </main>`
 }
 
 function render() {
-  const views = {
-    welcome: welcomeView,
-    mission: missionView,
-    box: boxView,
-    connect: connectView,
-    complete: completeView,
-  }
-  app.innerHTML = `<div class="game-shell">${topbar()}${views[state.phase]()}</div>`
+  const view = state.phase === 'welcome' ? welcomeView() : state.phase === 'play' ? playView() : resultsView()
+  app.innerHTML = `<div class="game-shell">${topbar()}${view}</div>`
   bindEvents()
 }
 
-function bindEvents() {
-  app.querySelectorAll('[data-action]').forEach((button) => {
-    button.addEventListener('click', () => handleAction(button.dataset.action))
-  })
-
-  app.querySelectorAll('[data-token]').forEach((token) => {
-    token.addEventListener('click', () => {
-      state.selectedToken = state.selectedToken === token.dataset.token ? null : token.dataset.token
-      const selected = tokenById(state.selectedToken)
-      state.feedback = selected ? `“${selected.label}” selected. Now choose a slot.` : ''
-      state.feedbackKind = ''
-      render()
-    })
-    token.addEventListener('dragstart', (event) => {
-      event.dataTransfer.setData('text/plain', token.dataset.token)
-      event.dataTransfer.effectAllowed = 'move'
-    })
-  })
-
-  app.querySelectorAll('[data-slot]').forEach((slot) => {
-    slot.addEventListener('click', () => {
-      const before = Number(slot.dataset.slot)
-      const placedToken = slot.dataset.placedToken
-      if (state.selectedToken) {
-        if (state.selectedToken === placedToken) {
-          delete state.placements[before]
-          state.selectedToken = null
-          state.linksChecked = false
-          state.invalidSlots = []
-          state.feedback = 'Word returned to the box.'
-          render()
-        } else {
-          placeToken(before, state.selectedToken)
-        }
-      } else if (placedToken) {
-        state.selectedToken = placedToken
-        state.feedback = `“${tokenById(placedToken).label}” selected. Choose another slot to move or swap it.`
-        state.feedbackKind = ''
-        render()
-      }
-    })
-    slot.addEventListener('dragstart', (event) => {
-      if (!slot.dataset.placedToken) return
-      event.dataTransfer.setData('text/plain', slot.dataset.placedToken)
-      event.dataTransfer.effectAllowed = 'move'
-    })
-    slot.addEventListener('dragover', (event) => {
-      event.preventDefault()
-      slot.classList.add('is-over')
-    })
-    slot.addEventListener('dragleave', () => slot.classList.remove('is-over'))
-    slot.addEventListener('drop', (event) => {
-      event.preventDefault()
-      placeToken(Number(slot.dataset.slot), event.dataTransfer.getData('text/plain'))
-    })
-  })
-
-  const returnZone = app.querySelector('[data-return-zone]')
-  if (returnZone) {
-    returnZone.addEventListener('dragover', (event) => {
-      event.preventDefault()
-      returnZone.classList.add('is-over')
-    })
-    returnZone.addEventListener('dragleave', () => returnZone.classList.remove('is-over'))
-    returnZone.addEventListener('drop', (event) => {
-      event.preventDefault()
-      const tokenId = event.dataTransfer.getData('text/plain')
-      const sourceEntry = Object.entries(state.placements).find(([, placedId]) => placedId === tokenId)
-      if (!sourceEntry) return
-      delete state.placements[sourceEntry[0]]
-      state.selectedToken = null
-      state.linksChecked = false
-      state.invalidSlots = []
-      state.feedback = 'Word returned to the box. Keep arranging freely.'
-      state.feedbackKind = ''
-      render()
-    })
-  }
-}
-
-function handleAction(action) {
-  if (action === 'start') {
-    state.phase = 'mission'
-    render()
-    requestAnimationFrame(() => document.querySelector('#sentence-input')?.focus())
-  }
-  if (action === 'mute') {
-    state.muted = !state.muted
-    render()
-  }
-  if (action === 'hint') {
-    state.hintVisible = !state.hintVisible
-    render()
-  }
-  if (action === 'sample') {
-    const input = document.querySelector('#sentence-input')
-    input.value = missions[state.completed.length].sample
-    input.focus()
-  }
-  if (action === 'lock') lockSentence()
-  if (action === 'timer') toggleTimer()
-  if (action === 'check-links') checkLinks()
-  if (action === 'open-box') {
-    state.phase = 'connect'
-    state.feedback = 'The words are loose! Build the logical path.'
-    playSound('victory')
-    render()
-  }
-  if (action === 'finish') {
-    state.phase = 'complete'
-    playSound('victory')
-    render()
-  }
-  if (action === 'reset' && window.confirm('Reset this classroom mission and clear the paragraph?')) resetGame()
-  if (action === 'reset-now') resetGame()
-}
-
-function lockSentence() {
-  const input = document.querySelector('#sentence-input')
-  const feedback = document.querySelector('#input-feedback')
-  const sentence = input.value.trim()
-  if (sentence.length < 8 || !/[a-z]/i.test(sentence)) {
-    feedback.textContent = 'Clippy needs a complete sentence before it can be locked.'
-    feedback.className = 'input-feedback is-error'
-    input.focus()
-    playSound('wrong')
-    return
-  }
-  const finalSentence = /[.!?]$/.test(sentence) ? sentence : `${sentence}.`
-  state.locking = true
-  stopTimer()
-  const rect = input.getBoundingClientRect()
-  const flyer = document.createElement('div')
-  flyer.className = 'sentence-flyer'
-  flyer.textContent = finalSentence
-  flyer.style.left = `${rect.left}px`
-  flyer.style.top = `${rect.top}px`
-  flyer.style.width = `${rect.width}px`
-  document.body.appendChild(flyer)
-  requestAnimationFrame(() => flyer.classList.add('is-flying'))
-  playSound('correct')
-
-  window.setTimeout(() => {
-    state.completed.push(finalSentence)
-    state.hintVisible = false
-    state.timer = 60
-    state.locking = false
-    flyer.remove()
-    state.phase = state.completed.length === missions.length ? 'box' : 'mission'
-    render()
-    requestAnimationFrame(() => document.querySelector('#sentence-input')?.focus())
-  }, 680)
-}
-
-function toggleTimer() {
-  if (state.timerRunning) {
-    stopTimer()
-    render()
-    return
-  }
-  if (state.timer <= 0) state.timer = 60
-  state.timerRunning = true
-  state.timerId = window.setInterval(() => {
-    state.timer -= 1
-    const value = document.querySelector('#timer-value')
-    if (value) value.textContent = state.timer
-    if (state.timer <= 10) document.querySelector('.timer-strip')?.classList.add('is-low')
-    if (state.timer <= 0) {
-      stopTimer()
-      state.feedback = "Time's up — Clippy needs backup. Class?"
-      render()
-    }
-  }, 1000)
-  render()
-}
-
-function stopTimer() {
-  window.clearInterval(state.timerId)
-  state.timerId = null
-  state.timerRunning = false
-}
-
-function placeToken(before, tokenId) {
-  if (!linkSlots.some((slot) => slot.before === before) || !tokenById(tokenId)) return
-  const sourceEntry = Object.entries(state.placements).find(([, placedId]) => placedId === tokenId)
-  const sourceBefore = sourceEntry ? Number(sourceEntry[0]) : null
-  const displacedToken = state.placements[before]
-
-  if (sourceBefore !== null) delete state.placements[sourceBefore]
-  state.placements[before] = tokenId
-  if (displacedToken && sourceBefore !== null) state.placements[sourceBefore] = displacedToken
-
-  state.selectedToken = null
-  state.linksChecked = false
-  state.invalidSlots = []
-  state.feedback = displacedToken ? 'Words swapped. Keep arranging, then check all connections.' : 'Word placed. You can still move or swap it.'
-  state.feedbackKind = ''
-  render()
-}
-
-function checkLinks() {
-  const invalid = linkSlots.filter((slot) => {
-    const label = tokenById(state.placements[slot.before])?.label
-    return !isValidLinkLabel(slot.before, label)
-  }).map((slot) => slot.before)
-
-  state.invalidSlots = invalid
-  if (invalid.length === 0) {
-    state.linksChecked = true
-    state.feedback = 'All connections work! Second and Besides can switch places here.'
-    state.feedbackKind = 'is-success'
+function checkAnswer() {
+  const challenge = challenges[state.questionIndex]
+  const step = challenge.steps[state.stepIndex]
+  if (!state.selected || !step) return
+  if (state.selected === step.answer) {
+    state.answers[state.questionIndex].push(step.answer)
+    state.stepIndex += 1
+    state.selected = null
+    state.feedback = state.stepIndex === challenge.steps.length
+      ? 'Chính xác! Bạn đã hoàn thành toàn bộ câu này.'
+      : 'Chính xác! Tiếp tục tìm thành phần kế tiếp nhé.'
+    state.feedbackKind = 'success'
     playSound('correct')
   } else {
-    state.linksChecked = false
-    state.feedback = `${invalid.length} connection${invalid.length === 1 ? '' : 's'} need another look. You can move or swap any word.`
-    state.feedbackKind = 'is-gentle'
+    state.mistakes[state.questionIndex] += 1
+    state.selected = null
+    state.feedback = `Không đúng mất rồi, bạn thử lại nha! ${step.hint}`
+    state.feedbackKind = 'error'
     playSound('wrong')
   }
   render()
 }
 
-function resetGame() {
-  stopTimer()
-  Object.assign(state, {
-    phase: 'welcome', completed: [], hintVisible: false, timer: 60,
-    selectedToken: null, placements: {}, feedback: '', feedbackKind: '', locking: false,
-    tokenOrder: shuffledTokens(),
-    linksChecked: false, invalidSlots: [],
-  })
+function nextQuestion() {
+  if (state.questionIndex === challenges.length - 1) {
+    state.phase = 'results'
+    emitCompletion()
+    playSound('victory')
+  } else {
+    state.questionIndex += 1
+    state.stepIndex = 0
+    state.selected = null
+    state.feedback = ''
+    state.feedbackKind = ''
+  }
+  render()
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function resetGame(startImmediately = false) {
+  const muted = state.muted
+  state = initialState()
+  state.muted = muted
+  if (startImmediately) state.phase = 'play'
   render()
 }
 
+function bindEvents() {
+  app.querySelectorAll('[data-segment]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.selected = state.selected === button.dataset.segment ? null : button.dataset.segment
+      state.feedback = state.selected ? 'Bạn đã chọn một phần câu. Nhấn “Kiểm tra” khi sẵn sàng.' : ''
+      state.feedbackKind = ''
+      render()
+    })
+  })
+  app.querySelectorAll('[data-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const action = button.dataset.action
+      if (action === 'start') { state.phase = 'play'; render() }
+      if (action === 'mute') { state.muted = !state.muted; render() }
+      if (action === 'check') checkAnswer()
+      if (action === 'next') nextQuestion()
+      if (action === 'restart') resetGame(true)
+      if (action === 'reset' && window.confirm('Bạn muốn xoá kết quả hiện tại và chơi lại từ đầu?')) resetGame(true)
+    })
+  })
+}
+
+window.DOLSentenceGame = { getResults: buildResults }
 render()
