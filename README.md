@@ -22,26 +22,16 @@ npm test
 npm run build
 ```
 
-## LMS completion event
+## DOL LMS integration
 
-The game does not collect student identity or store results on a server. On
-completion it dispatches a browser event named `dol-game-complete`. The current
-result is also available from `window.DOLSentenceGame.getResults()`.
+The LMS launches the game with `studentId`, `studentName`, `courseId`,
+`assignmentId`, and `parentOrigin` query parameters. On completion the game
+sends a top-level `DOL_LMS_RESULT` message containing the learner, accuracy on
+a 100-point scale, duration, incorrect checks, and per-sentence details. No
+build-time LMS origin is required.
 
-When the game is embedded in an LMS, set `VITE_LMS_ORIGIN` to the exact LMS
-origin at build time. The game will then send the same payload to its parent:
-
-```js
-window.addEventListener('message', (event) => {
-  if (event.origin !== 'https://YOUR-GAME-DOMAIN') return
-  if (event.data?.type === 'DOL_GAME_COMPLETE') {
-    // Map event.data.payload to the LMS result API.
-  }
-})
-```
-
-The adapter intentionally does not guess a SCORM, xAPI, or LTI contract. Add
-that mapping after the company LMS is known.
+The browser event `dol-game-complete` and
+`window.DOLSentenceGame.getResults()` remain available for standalone use.
 
 ## Dokploy
 

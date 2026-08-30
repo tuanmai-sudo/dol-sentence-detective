@@ -5,8 +5,10 @@ import wrongUrl from '../assets/audio/sfx/wrong-soft.mp3'
 import victoryUrl from '../assets/audio/sfx/victory-fanfare.mp3'
 import astronautUrl from './assets/astronaut-guide.png'
 import { calculateAccuracy, challenges, countComponents, getPerformance } from './game-data.js'
+import { createLMSBridge } from './lms-bridge.js'
 
 const app = document.querySelector('#app')
+const lms = createLMSBridge('dol-sentence-detective-b1')
 const sounds = {
   correct: new Audio(correctUrl),
   wrong: new Audio(wrongUrl),
@@ -199,10 +201,15 @@ function emitCompletion() {
   state.completionEmitted = true
   const payload = buildResults()
   window.dispatchEvent(new CustomEvent('dol-game-complete', { detail: payload }))
-  const targetOrigin = import.meta.env.VITE_LMS_ORIGIN
-  if (targetOrigin && window.parent !== window) {
-    window.parent.postMessage({ type: 'DOL_GAME_COMPLETE', payload }, targetOrigin)
-  }
+  lms.complete({
+    score: payload.accuracy,
+    maxScore: 100,
+    correctCount: payload.correctComponents,
+    incorrectCount: payload.totalIncorrectChecks,
+    answers: payload.sentences,
+    details: { performance: payload.performance },
+    completedAt: payload.completedAt,
+  })
 }
 
 function resultsView() {
@@ -280,6 +287,7 @@ function resetGame(startImmediately = false) {
   const muted = state.muted
   state = initialState()
   state.muted = muted
+  lms.resetTimer()
   if (startImmediately) state.phase = 'play'
   render()
 }
