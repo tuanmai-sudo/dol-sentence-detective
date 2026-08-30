@@ -247,6 +247,7 @@ function render() {
   const view = state.phase === 'welcome' ? welcomeView() : state.phase === 'play' ? playView() : resultsView()
   app.innerHTML = `<div class="game-shell">${topbar()}${view}</div>`
   bindEvents()
+  if (state.phase === 'play') lms.progress({ resumeState: state })
 }
 
 function checkAnswer() {
@@ -319,4 +320,11 @@ function bindEvents() {
 }
 
 window.DOLSentenceGame = { getResults: buildResults }
+window.addEventListener('message', (event) => {
+  if (event.source !== window.parent || event.data?.event !== 'DOL_LMS_RESUME') return
+  const resumed = event.data.payload?.details?.resumeState
+  if (!resumed || resumed.phase !== 'play') return
+  state = { ...initialState(), ...resumed, completionEmitted: false }
+  render()
+})
 render()
