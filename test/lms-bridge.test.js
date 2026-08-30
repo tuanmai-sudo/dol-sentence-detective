@@ -6,7 +6,7 @@ test('reads learner and parent context supplied by the LMS', () => {
   const context = readLMSContext('?studentId=s1&studentName=An%20Nguyen&courseId=c1&assignmentId=a1&parentOrigin=https%3A%2F%2Flms.example.com')
   assert.deepEqual(context, {
     learner: { studentId: 's1', studentName: 'An Nguyen', courseId: 'c1', assignmentId: 'a1' },
-    parentOrigin: 'https://lms.example.com',
+    gameId: '', attemptId: 'standalone', parentOrigin: 'https://lms.example.com',
   })
 })
 

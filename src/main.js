@@ -9,6 +9,7 @@ import { createLMSBridge } from './lms-bridge.js'
 
 const app = document.querySelector('#app')
 const lms = createLMSBridge('dol-sentence-detective-b1')
+const completionKey = `dol-sentence-detective:${lms.storageScope}:completed:v1`
 const sounds = {
   correct: new Audio(correctUrl),
   wrong: new Audio(wrongUrl),
@@ -39,7 +40,10 @@ function initialState() {
   }
 }
 
-let state = initialState()
+function restoredState() {
+  try { const saved = JSON.parse(localStorage.getItem(completionKey) || 'null'); return saved?.phase === 'results' ? { ...initialState(), ...saved, completionEmitted: true } : null } catch { return null }
+}
+let state = restoredState() || initialState()
 
 function playSound(name) {
   if (state.muted) return
@@ -73,7 +77,7 @@ function topbar() {
     ${state.phase !== 'welcome' ? `<div class="topbar__progress" aria-label="Tiến độ ${percent}%"><span><i style="width:${percent}%"></i></span><b>${percent}%</b></div>` : ''}
     <div class="topbar__tools">
       <button class="icon-button" data-action="mute" aria-label="${state.muted ? 'Bật âm thanh' : 'Tắt âm thanh'}" title="${state.muted ? 'Bật âm thanh' : 'Tắt âm thanh'}">${state.muted ? icons.mute : icons.sound}</button>
-      ${state.phase !== 'welcome' ? `<button class="icon-button" data-action="reset" aria-label="Chơi lại từ đầu" title="Chơi lại từ đầu">${icons.reset}</button>` : ''}
+      ${state.phase === 'play' ? `<button class="icon-button" data-action="reset" aria-label="Làm lại lượt hiện tại" title="Làm lại lượt hiện tại">${icons.reset}</button>` : ''}
     </div>
   </header>`
 }
@@ -210,6 +214,7 @@ function emitCompletion() {
     details: { performance: payload.performance },
     completedAt: payload.completedAt,
   })
+  try { localStorage.setItem(completionKey, JSON.stringify(state)) } catch {}
 }
 
 function resultsView() {
@@ -233,7 +238,7 @@ function resultsView() {
         <div class="result-row result-row--head"><span>Câu</span><span>Cấu trúc</span><span>Thử lại</span><span>Chính xác</span></div>
         ${results.sentences.map((item) => `<div class="result-row"><b>${String(item.number).padStart(2, '0')}</b><span>${item.structure}</span><span>${item.incorrectChecks}</span><strong>${item.accuracy}%</strong></div>`).join('')}
       </div>
-      <div class="result-actions"><p>Kết quả đã sẵn sàng để LMS nhận khi được tích hợp.</p><button class="primary-button" data-action="restart">CHƠI LẠI ${icons.reset}</button></div>
+      <div class="result-actions"><p>Kết quả đã được gửi về LMS. Muốn làm lượt mới, hãy quay lại dashboard và bấm “Làm lại bài”.</p></div>
     </section>
   </main>`
 }
@@ -308,7 +313,6 @@ function bindEvents() {
       if (action === 'mute') { state.muted = !state.muted; render() }
       if (action === 'check') checkAnswer()
       if (action === 'next') nextQuestion()
-      if (action === 'restart') resetGame(true)
       if (action === 'reset' && window.confirm('Bạn muốn xoá kết quả hiện tại và chơi lại từ đầu?')) resetGame(true)
     })
   })

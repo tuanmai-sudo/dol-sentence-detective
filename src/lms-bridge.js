@@ -17,6 +17,8 @@ export function readLMSContext(search = '', referrer = '') {
   }
   return {
     learner,
+    gameId: params.get('gameId') || '',
+    attemptId: params.get('attemptId') || 'standalone',
     parentOrigin: validOrigin(params.get('parentOrigin')) || validOrigin(referrer) || '*',
   }
 }
@@ -45,20 +47,23 @@ export function buildLMSResult({
 
 export function createLMSBridge(gameId) {
   const context = readLMSContext(window.location.search, document.referrer)
+  const resolvedGameId = context.gameId || gameId
   let startedAt = Date.now()
   const post = (payload) => {
     if (window.parent !== window) window.parent.postMessage(payload, context.parentOrigin)
   }
   return {
     learner: context.learner,
+    attemptId: context.attemptId,
+    storageScope: [context.learner.studentId, context.learner.assignmentId, context.attemptId].filter(Boolean).join(':') || 'standalone',
     resetTimer() { startedAt = Date.now() },
     progress(details = {}) {
-      post({ event: 'DOL_GAME_PROGRESS', gameId, status: 'in_progress', learner: context.learner, details })
+      post({ event: 'DOL_GAME_PROGRESS', gameId: resolvedGameId, status: 'in_progress', learner: context.learner, details })
     },
     complete(result = {}) {
       const payload = buildLMSResult({
         ...result,
-        gameId,
+        gameId: resolvedGameId,
         learner: context.learner,
         durationSeconds: result.durationSeconds ?? (Date.now() - startedAt) / 1000,
       })
